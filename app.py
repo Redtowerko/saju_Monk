@@ -398,183 +398,197 @@ def render_signup_view():
         st.session_state.auth_mode = 'login'
         st.rerun()
 
-# --- [메인 앱 페이지] ---
+# --- [메인 앱 페이지: 모바일 앱 스타일] ---
 def main_app_page():
-    # 스타일 설정
-    st.markdown("""<style>h1 { font-family: 'Serif'; } .stChatInputContainer { padding-bottom: 20px; } .stChatMessage { border-radius: 15px; margin-bottom: 10px; }</style>""", unsafe_allow_html=True)
+    # 모바일 친화적 스타일 (버튼 꽉 차게, 폰트 조정)
+    st.markdown("""
+    <style>
+        .stButton>button { width: 100%; border-radius: 12px; height: 3em; font-weight: bold; }
+        .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+        .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 8px; padding: 0 10px; }
+        .stTabs [aria-selected="true"] { background-color: #ff4b4b; color: white; }
+        h1 { font-size: 1.8rem; } h2 { font-size: 1.5rem; } h3 { font-size: 1.2rem; }
+    </style>
+    """, unsafe_allow_html=True)
     
-    # DB에서 사용자 정보 가져오기 (최초 1회)
+    # DB에서 최신 사용자 정보 가져오기 (구독 정보 포함)
+    user_id = st.session_state['user'].id
     if "db_user_info" not in st.session_state:
         try:
-            user_id = st.session_state['user'].id
             data = supabase.table("users").select("*").eq("id", user_id).execute()
             if data.data:
                 st.session_state['db_user_info'] = data.data[0]
         except:
-            st.session_state['db_user_info'] = {}
-
+            pass
+            
     user_info = st.session_state.get('db_user_info', {})
-    
-    # --- [사이드바: 입력 컨트롤 패널] ---
-    with st.sidebar:
-        st.title(f"반갑습니다, {user_info.get('name', '회원')}님!")
+    subscription_plan = user_info.get('subscription_plan', 'free') # free 또는 pro
+
+    # --- [네비게이션: 모바일 탭 구조] ---
+    # 실제 앱의 하단 바 역할을 합니다.
+    tab_home, tab_analysis, tab_match, tab_my = st.tabs(["🏠 홈", "🔮 사주분석", "💞 매칭", "👤 내 정보"])
+
+    # ----------------------------------------------------------------
+    # 1. [홈 탭] 오늘의 운세 (짧고 강렬하게)
+    # ----------------------------------------------------------------
+    with tab_home:
+        st.markdown(f"### 👋 반가워요, **{user_info.get('name', '회원')}**님!")
+        
+        # 오늘의 운세 카드
+        with st.container(border=True):
+            st.markdown("##### 📅 오늘의 한 줄 운세")
+            
+            # [비용 절감] 매번 API 쓰지 말고, 날짜가 같으면 기존 거 보여주기 (세션 활용)
+            today_str = datetime.date.today().strftime("%Y-%m-%d")
+            
+            if "today_fortune" not in st.session_state or st.session_state.get("fortune_date") != today_str:
+                # 간단한 AI 요청 (30자 제한)
+                try:
+                    # 간단한 로직으로 대체하거나(비용0), 매우 짧은 프롬프트 사용
+                    short_prompt = f"사용자({user_info.get('name')})를 위해 오늘({today_str})의 운세를 희망찬 이모지 1개와 함께 30자 이내로 한 문장으로 작성해."
+                    resp = gemini_client.models.generate_content(model=TARGET_MODEL_NAME, contents=short_prompt)
+                    st.session_state["today_fortune"] = resp.text
+                    st.session_state["fortune_date"] = today_str
+                except:
+                    st.session_state["today_fortune"] = "🍀 오늘은 작은 행운이 깃든 하루가 될 거예요!"
+            
+            st.info(st.session_state["today_fortune"])
+            st.caption(f"기준: {today_str}")
+
+        st.markdown("---")
+        st.markdown("#### 🔥 인기 콘텐츠")
+        c1, c2 = st.columns(2)
+        with c1: st.button("💰 재물운 보기")
+        with c2: st.button("💘 연애운 보기")
+
+    # ----------------------------------------------------------------
+    # 2. [사주분석 탭] 핵심 기능
+    # ----------------------------------------------------------------
+    with tab_analysis:
+        st.header("🔍 정통 사주 분석")
+        
+        # 분석 결과가 없으면 -> 입력창 보여줌
+        # 분석 결과가 있으면 -> 결과창 보여줌
+        
+        if "analysis_result" not in st.session_state:
+            # [입력 모드]
+            st.info("정확한 분석을 위해 정보를 확인해주세요.")
+            
+            # 기본값 설정
+            def_date = datetime.date.today()
+            def_time = datetime.time(12, 0)
+            def_idx = 0
+            if user_info.get('birth_date'):
+                def_date = datetime.datetime.strptime(user_info['birth_date'], "%Y-%m-%d").date()
+            if user_info.get('birth_time'):
+                t_str = user_info['birth_time']
+                if len(t_str) > 5: def_time = datetime.datetime.strptime(t_str, "%H:%M:%S").time()
+                else: def_time = datetime.datetime.strptime(t_str, "%H:%M").time()
+            if user_info.get('gender') == '남성': def_idx = 1
+
+            with st.container(border=True):
+                input_date = st.date_input("생년월일", value=def_date, min_value=datetime.date(1900, 1, 1))
+                input_time = st.time_input("태어난 시간", value=def_time)
+                input_gender = st.radio("성별", ["여성", "남성"], index=def_idx, horizontal=True)
+                
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            if st.button("🔮 사주 분석 시작하기", type="primary"):
+                # 1. 만세력 계산
+                saju = calculate_saju_pillars(input_date.year, input_date.month, input_date.day, input_time.hour, input_time.minute)
+                cnt = {"목(木)":0, "화(火)":0, "토(土)":0, "금(金)":0, "수(水)":0}
+                for p in saju.values():
+                    if p['gan'] in OHEANG_MAP: cnt[OHEANG_MAP[p['gan']]] += 1
+                    if p['ji'] in OHEANG_MAP: cnt[OHEANG_MAP[p['ji']]] += 1
+                
+                # 세션 저장
+                st.session_state["saju_result"] = saju
+                st.session_state["element_counts"] = cnt
+                
+                # [cite_start]2. AI 분석 요청 (무료/유료 분기) [cite: 7]
+                with st.spinner("운명을 분석 중입니다..."):
+                    try:
+                        u_ctx = {"name": user_info.get('name'), "gender": input_gender, "date": input_date, "time": input_time}
+                        full_saju = f"년주:{saju['year']['gan']}{saju['year']['ji']}, 일주:{saju['day']['gan']}{saju['day']['ji']}"
+                        
+                        if subscription_plan == 'free':
+                            # [무료] 글자수 제한, 맛보기 요약
+                            sys_prompt = f"""
+                            너는 사주 전문가야. 아래 사람의 사주를 분석해줘.
+                            단, 무료 회원이므로 **핵심 내용만 150자 이내로** 매우 짧게 요약해서 말해줘.
+                            마지막에 "더 자세한 내용은 구독을 통해 확인하세요."라고 덧붙여.
+                            [정보] {u_ctx}, 사주: {full_saju}, 오행: {cnt}
+                            """
+                        else:
+                            # [유료] 제한 없는 상세 분석
+                            sys_prompt = f"""
+                            너는 사주 전문가야. 아래 사람의 사주를 아주 상세하고 친절하게 분석해줘.
+                            전체 형국, 성격, 재물운, 직업운, 조언을 포함해서 1000자 내외로 풍부하게 작성해줘.
+                            [정보] {u_ctx}, 사주: {full_saju}, 오행: {cnt}
+                            """
+                        
+                        resp = gemini_client.models.generate_content(model=TARGET_MODEL_NAME, contents=sys_prompt)
+                        st.session_state["analysis_result"] = resp.text
+                        st.rerun() # 화면 갱신
+                        
+                    except Exception as e:
+                        st.error(f"분석 중 오류: {e}")
+
+        else:
+            # [결과 모드]
+            st.success("분석이 완료되었습니다!")
+            
+            # 사주 카드 표시 (접었다 폈다 가능하게)
+            with st.expander("내 사주 명식표 보기", expanded=False):
+                st.markdown(get_saju_card_html(st.session_state["saju_result"]), unsafe_allow_html=True)
+            
+            # 분석 결과 텍스트
+            st.markdown("### 📜 분석 결과")
+            st.write(st.session_state["analysis_result"])
+            
+            # 무료 회원일 경우 블러 처리 효과(느낌) 및 구독 유도
+            if subscription_plan == 'free':
+                st.markdown("---")
+                st.warning("🔒 여기까지는 무료 요약본입니다.")
+                st.info("지금 구독하면 **재물운, 직업운, 10년 대운**까지 무제한으로 볼 수 있습니다!")
+                if st.button("💎 3초만에 구독하고 전체 풀이 보기"):
+                    # 실제 결제 연동 전이므로 DB 업데이트 시늉
+                    st.toast("테스트: 'pro' 등급으로 업그레이드합니다. (DB수정 필요)")
+                    # 여기서 supabase update 로직을 넣거나, 결제창 띄움
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🔄 다른 사주 다시 보기"):
+                del st.session_state["analysis_result"]
+                st.rerun()
+
+    # ----------------------------------------------------------------
+    # 3. [매칭 탭]
+    # ----------------------------------------------------------------
+    with tab_match:
+        st.header("💞 운명의 상대 매칭")
+        st.info("준비 중인 기능입니다.")
+        if user_info.get('agree_location'):
+            st.map() # 위치 동의했으면 지도 보여주기 (간지)
+        else:
+            st.error("위치 정보 이용에 동의해야 내 주변 귀인을 찾을 수 있습니다.")
+
+    # ----------------------------------------------------------------
+    # 4. [내 정보 탭]
+    # ----------------------------------------------------------------
+    with tab_my:
+        st.header("내 정보")
+        st.write(f"**이름:** {user_info.get('name')}")
+        st.write(f"**등급:** {'💎 PRO' if subscription_plan == 'pro' else '🌱 FREE'}")
+        
+        if subscription_plan == 'free':
+            st.button("💎 프리미엄 구독하기")
+        
+        st.divider()
+        st.caption("고객센터 | 이용약관 | 개인정보처리방침")
         if st.button("로그아웃"):
             supabase.auth.sign_out()
             st.session_state.clear()
             st.rerun()
-            
-        st.divider()
-        st.subheader("📝 사주 정보 입력")
-        
-        # 1. DB 정보를 기본값(Default)으로 설정
-        default_date = datetime.date.today()
-        default_time = datetime.time(12, 0)
-        default_gender_idx = 0
-        
-        if user_info:
-            try:
-                default_date = datetime.datetime.strptime(user_info.get('birth_date'), "%Y-%m-%d").date()
-                # 시간 형식이 HH:MM:SS 또는 HH:MM 일 수 있음
-                t_str = user_info.get('birth_time', '00:00:00')
-                if len(t_str) > 5:
-                    default_time = datetime.datetime.strptime(t_str, "%H:%M:%S").time()
-                else:
-                    default_time = datetime.datetime.strptime(t_str, "%H:%M").time()
-                
-                if user_info.get('gender') == '남성':
-                    default_gender_idx = 1
-            except:
-                pass
-
-        # 2. 사용자 입력 위젯 (수정 가능)
-        input_date = st.date_input("생년월일", value=default_date, min_value=datetime.date(1900, 1, 1))
-        input_time = st.time_input("태어난 시간", value=default_time)
-        input_gender = st.radio("성별", ["여성", "남성"], index=default_gender_idx, horizontal=True)
-        
-        st.divider()
-        
-        # 3. 페르소나 선택
-        st.subheader("💬 상담 설정")
-        selected_persona_key = st.selectbox("상담가 선택", list(PERSONAS.keys()), index=0)
-        current_persona = PERSONAS[selected_persona_key]
-        
-        st.info(f"**{current_persona['name']}**\n\n{current_persona['description']}")
-        
-        # 4. 분석 시작 버튼
-        st.markdown("---")
-        btn_analyze = st.button("🔍 사주 분석하기", type="primary", use_container_width=True)
-
-        # 5. 매칭 기능 (Beta)
-        st.caption("🚀 Beta Feature")
-        if st.button("💘 내 귀인 찾기 (매칭)"):
-            if user_info.get('agree_location'):
-                st.toast("준비 중입니다.", icon="🚧")
-            else:
-                st.error("위치 정보 동의가 필요합니다.")
-
-    # --- [메인 화면 로직] ---
-    
-    # 버튼을 눌렀을 때만 새로운 분석 실행
-    if btn_analyze:
-        # 만세력 계산
-        saju = calculate_saju_pillars(input_date.year, input_date.month, input_date.day, input_time.hour, input_time.minute)
-        
-        # 오행 계산
-        cnt = {"목(木)":0, "화(火)":0, "토(土)":0, "금(金)":0, "수(水)":0}
-        for p in saju.values():
-            if p['gan'] in OHEANG_MAP: cnt[OHEANG_MAP[p['gan']]] += 1
-            if p['ji'] in OHEANG_MAP: cnt[OHEANG_MAP[p['ji']]] += 1
-            
-        # 세션에 저장 (화면 유지용)
-        st.session_state["saju_result"] = saju
-        st.session_state["element_counts"] = cnt
-        st.session_state["target_user_info"] = { # 현재 분석 중인 대상 정보
-            "name": user_info.get('name', '사용자'),
-            "gender": input_gender,
-            "date": input_date,
-            "time": input_time
-        }
-        
-        # AI 분석 요청 (새로운 정보로)
-        with st.spinner(f"{current_persona['name']}님이 운세를 살피고 있습니다..."):
-            ans = generate_detailed_analysis(saju, st.session_state["target_user_info"], cnt, selected_persona_key)
-            st.session_state["analysis_result"] = ans
-            
-        # 페르소나 변경 감지 시 채팅 리셋
-        st.session_state["current_persona"] = selected_persona_key
-        st.session_state["messages"] = [{"role": "assistant", "content": current_persona['welcome']}]
-        
-        st.rerun()
-
-    # 결과 보여주기
-    if "saju_result" in st.session_state:
-        saju = st.session_state["saju_result"]
-        element_counts = st.session_state["element_counts"]
-        # 페르소나가 중간에 바뀌었을 수도 있으니 현재 선택된 것으로 갱신
-        current_persona = PERSONAS[selected_persona_key] 
-
-        tab1, tab2 = st.tabs([f"💬 {current_persona['name']} 채팅", "📜 상세 분석 결과"])
-
-        with tab2: # 분석 탭
-            st.header("사주팔자(四柱八字) 명식")
-            st.markdown(get_saju_card_html(saju), unsafe_allow_html=True)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("오행 분포")
-                fig = go.Figure()
-                fig.add_trace(go.Scatterpolar(r=list(element_counts.values()), theta=list(element_counts.keys()), fill='toself', marker=dict(color="#FF9800"), line=dict(color="#8D6E63")))
-                fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 5], showticklabels=False)), showlegend=False, height=300, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
-                st.plotly_chart(fig, use_container_width=True)
-            
-            st.markdown("---")
-            st.markdown(st.session_state.get("analysis_result", "분석 결과가 없습니다."))
-
-        with tab1: # 채팅 탭
-            st.title(f"{current_persona['name']}와의 상담")
-            
-            chat_container = st.container()
-            with chat_container:
-                # 메시지 기록이 없으면 초기화
-                if "messages" not in st.session_state:
-                    st.session_state["messages"] = [{"role": "assistant", "content": current_persona['welcome']}]
-                    
-                for msg in st.session_state.get("messages", []):
-                    avatar = current_persona['avatar'] if msg["role"] == "assistant" else "👤"
-                    with st.chat_message(msg["role"], avatar=avatar):
-                        st.markdown(msg["content"])
-            
-            if prompt := st.chat_input("더 궁금한 점을 물어보세요..."):
-                st.session_state["messages"].append({"role": "user", "content": prompt})
-                with st.chat_message("user", avatar="👤"):
-                    st.markdown(prompt)
-                
-                with st.chat_message("assistant", avatar=current_persona['avatar']):
-                    with st.spinner("답변을 생각 중입니다..."):
-                        try:
-                            # 현재 입력되어 있는(분석된) 정보 기준
-                            tgt_info = st.session_state.get("target_user_info", {})
-                            full_saju = f"년주:{saju['year']['gan']}{saju['year']['ji']}, 일주:{saju['day']['gan']}{saju['day']['ji']}"
-                            
-                            sys_prompt = f"{current_persona['prompt_instruction']}\n[내담자 정보] {tgt_info}\n[사주명식] {full_saju}\n[질문] {prompt}\n[말투] {current_persona['tone']}"
-                            
-                            response = gemini_client.models.generate_content(model=TARGET_MODEL_NAME, contents=sys_prompt)
-                            st.markdown(response.text)
-                            st.session_state["messages"].append({"role": "assistant", "content": response.text})
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"에러: {e}")
-                            
-    else:
-        # [초기 화면] 아직 분석 버튼을 누르지 않았을 때
-        st.info("👈 왼쪽 사이드바에서 생년월일과 시간을 확인하고 **[사주 분석하기]** 버튼을 눌러주세요.")
-        st.markdown("""
-        ### 사용 방법
-        1. 왼쪽 **사이드바**를 확인하세요.
-        2. 회원가입 시 입력한 정보가 기본으로 설정되어 있습니다.
-        3. **날짜, 시간, 성별**을 자유롭게 수정할 수 있습니다.
-        4. **[사주 분석하기]** 버튼을 누르면 AI 분석이 시작됩니다.
-        """)
 
 # --- [앱 실행 진입점] ---
 if __name__ == "__main__":
