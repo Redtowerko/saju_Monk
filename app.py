@@ -148,7 +148,12 @@ def login_page():
                 st.session_state['is_logged_in'] = True
                 st.rerun()
             except Exception as e:
-                st.error(f"로그인 실패: 이메일 또는 비밀번호를 확인하세요.")
+                # 에러 메시지 분기 처리 (이메일 미인증 vs 비밀번호 틀림)
+                err_msg = str(e)
+                if "Email not confirmed" in err_msg:
+                    st.warning("⚠️ 이메일 인증이 완료되지 않았습니다. 메일함을 확인해주세요.")
+                else:
+                    st.error("로그인 실패: 이메일 또는 비밀번호를 확인하세요.")
 
     with tab2: # 회원가입
         st.info("회원가입을 위해 아래 정보를 입력해주세요. (* 표시는 필수 항목)")
@@ -156,18 +161,25 @@ def login_page():
         # 1. 아이디 (필수)
         new_username = st.text_input("아이디 *", key="signup_id")
         
-        # 2. 이메일 (필수, 형식 검증)
-        new_email = st.text_input("이메일 (본인인증 필수) *", key="signup_email", help="정확한 이메일 주소를 입력해주세요.")
+        # 2. 이메일 (필수)
+        new_email = st.text_input("이메일 (본인인증 필수) *", key="signup_email", help="가입 후 발송되는 메일에서 인증 링크를 클릭해야 가입이 완료됩니다.")
         
-        # 3. 비밀번호 & 확인 (필수)
+        # 3. 비밀번호 & 확인 (필수) - [즉시 확인 로직 적용]
         col_pw1, col_pw2 = st.columns(2)
         with col_pw1:
             new_password = st.text_input("비밀번호 *", type="password", key="signup_pw")
         with col_pw2:
             new_password_confirm = st.text_input("비밀번호 확인 *", type="password", key="signup_pw_confirm")
+        
+        # [비밀번호 일치 여부 즉시 피드백]
+        if new_password and new_password_confirm:
+            if new_password == new_password_confirm:
+                st.success("✅ 비밀번호가 일치합니다.")
+            else:
+                st.error("❌ 비밀번호가 일치하지 않습니다.")
             
-        # 4. 이름 (선택 -> 필수 아님)
-        new_name = st.text_input("이름", key="signup_name")
+        # 4. 이름 (필수)
+        new_name = st.text_input("이름 *", key="signup_name")
         
         # 5. 휴대전화 번호 (필수)
         new_phone = st.text_input("휴대전화 번호 *", placeholder="010-0000-0000", key="signup_phone")
@@ -179,7 +191,7 @@ def login_page():
         with col_s2:
             birth_time = st.time_input("태어난 시간")
             
-        # 8. 성별 (필수, '선택 안 함' 추가)
+        # 8. 성별 (필수, '선택 안 함'으로 변경)
         gender = st.radio("성별 *", ["여성", "남성", "선택 안 함"], horizontal=True, key="signup_gender")
 
         # --- [약관 동의 로직] ---
@@ -219,7 +231,7 @@ def login_page():
             st.markdown(load_term_file("marketing.md"))
         agree_marketing = st.checkbox("마케팅 정보 수신에 동의합니다. (선택)", key="agree_marketing", on_change=toggle_individual)
 
-        # 가입 버튼 및 유효성 검사
+        # 가입 버튼
         if st.button("가입하기", use_container_width=True):
             # 1. 필수 입력값 확인
             if not (new_username and new_email and new_password and new_password_confirm and new_phone):
@@ -227,7 +239,7 @@ def login_page():
             # 2. 비밀번호 일치 확인
             elif new_password != new_password_confirm:
                 st.error("비밀번호가 일치하지 않습니다.")
-            # 3. 이메일 형식 확인 (정규식)
+            # 3. 이메일 형식 확인
             elif not re.match(r"[^@]+@[^@]+\.[^@]+", new_email):
                 st.error("올바른 이메일 형식이 아닙니다.")
             # 4. 필수 약관 동의 확인
@@ -235,17 +247,29 @@ def login_page():
                 st.error("필수 약관에 모두 동의해야 가입할 수 있습니다.")
             else:
                 try:
-                    # Auth 가입
-                    auth_res = supabase.auth.sign_up({"email": new_email, "password": new_password})
+                    # [핵심] Auth 가입 요청 (이메일 발송됨)
+                    # options 데이터는 가입 후 메일 인증 시 Supabase가 DB에 트리거할 때 쓸 수 있습니다.
+                    auth_res = supabase.auth.sign_up({
+                        "email": new_email, 
+                        "password": new_password,
+                        "options": {
+                            "data": {
+                                "username": new_username,
+                                "name": new_name,
+                                "phone": new_phone
+                            }
+                        }
+                    })
                     
-                    if auth_res.user:
-                        # DB 저장 (새로 추가된 username, phone 포함)
+                    # Supabase Auth에 성공적으로 등록되었으면 (이메일 발송됨)
+                    if auth_res.user and auth_res.user.identities:
+                        # DB에 추가 정보 저장
                         user_data = {
                             "id": auth_res.user.id,
                             "email": new_email,
-                            "username": new_username,  # [신규] 아이디
+                            "username": new_username,
                             "name": new_name,
-                            "phone": new_phone,        # [신규] 전화번호
+                            "phone": new_phone,
                             "birth_date": str(birth_date),
                             "birth_time": str(birth_time),
                             "gender": gender,
@@ -253,7 +277,19 @@ def login_page():
                             "agree_marketing": agree_marketing
                         }
                         supabase.table("users").insert(user_data).execute()
-                        st.success("가입 성공! 로그인 탭에서 로그인해주세요.")
+                        
+                        # [성공 메시지 - 중요]
+                        st.success(f"""
+                        ✅ 가입 요청이 완료되었습니다! 
+                        
+                        **{new_email}** 주소로 인증 메일을 보냈습니다.
+                        메일함에서 **'Confirm your signup'** 버튼을 클릭하시면 가입이 완료됩니다.
+                        그 후 로그인 탭에서 로그인해주세요.
+                        """)
+                    else:
+                        # 이미 가입된 이메일 등
+                        st.warning("이미 가입된 이메일이거나 가입 요청을 처리할 수 없습니다.")
+                        
                 except Exception as e:
                     st.error(f"가입 오류: {str(e)}")
 
