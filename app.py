@@ -163,20 +163,20 @@ def login_page():
         gender = st.radio("성별", ["여성", "남성"], horizontal=True, key="signup_gender")
 
         # [수정] 약관 불러오기 (파일에서 로드)
-        [cite_start]with st.expander("📝 [필수] 서비스 이용약관 [cite: 153]"):
+        with st.expander("📝 [필수] 서비스 이용약관"):
             st.markdown(load_term_file("service.md"))
         agree_service = st.checkbox("서비스 이용약관에 동의합니다.")
 
-        [cite_start]with st.expander("🔒 [필수] 개인정보 수집 및 이용 동의 [cite: 5]"):
+        with st.expander("🔒 [필수] 개인정보 수집 및 이용 동의"):
             st.markdown(load_term_file("privacy.md"))
         agree_privacy = st.checkbox("개인정보 수집 및 이용에 동의합니다.")
 
-        # [cite_start][추가] 위치정보 (지역 매칭용) [cite: 31]
+        # [추가] 위치정보 (지역 매칭용)
         with st.expander("📍 [필수] 위치기반 서비스 이용약관 (매칭용)"):
             st.markdown(load_term_file("location.md"))
         agree_location = st.checkbox("위치기반 서비스 이용약관에 동의합니다.")
 
-        # [cite_start][추가] 마케팅 (광고용) - 선택 사항 [cite: 355]
+        # [추가] 마케팅 (광고용) - 선택 사항
         with st.expander("📢 [선택] 마케팅 정보 수신 동의 (광고)"):
             st.markdown(load_term_file("marketing.md"))
         agree_marketing = st.checkbox("마케팅 정보 수신에 동의합니다. (선택)")
