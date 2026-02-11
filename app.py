@@ -218,17 +218,74 @@ def render_reset_view():
 
 def render_signup_view():
     st.title("📝 회원가입")
-    st.caption("운명의 상대를 만나기 위한 첫 걸음입니다.")
+    st.caption("운명의 상대를 만나기 위한 첫 걸음입니다. (* 표시는 필수 항목)")
     
-    # 입력 폼
-    new_username = st.text_input("아이디 *")
-    new_email = st.text_input("이메일 (본인인증/비밀번호 찾기용) *", help="실제 사용 중인 이메일을 입력하세요.")
+    # [1] 아이디 중복 확인 로직
+    col_id1, col_id2 = st.columns([3, 1], vertical_alignment="bottom")
+    with col_id1:
+        # 아이디 입력값이 바뀌면 중복확인 상태 초기화 (on_change)
+        def reset_id_check():
+            st.session_state.id_checked = False
+        new_username = st.text_input("아이디 *", key="signup_username", on_change=reset_id_check)
     
+    with col_id2:
+        if st.button("중복 확인", key="btn_check_id", use_container_width=True):
+            if not new_username:
+                st.error("입력 필요")
+            else:
+                try:
+                    res = supabase.table("users").select("username").eq("username", new_username).execute()
+                    if res.data:
+                        st.error("사용 불가")
+                        st.session_state.id_checked = False
+                    else:
+                        st.success("사용 가능")
+                        st.session_state.id_checked = True
+                except Exception as e:
+                    st.error("오류 발생")
+    
+    # 상태 메시지 유지 (리런 되어도 메시지 보이게)
+    if st.session_state.get('id_checked') is True:
+        st.caption("✅ 사용 가능한 아이디입니다.")
+    elif st.session_state.get('id_checked') is False and new_username:
+        st.caption("❌ 중복 확인이 필요하거나 이미 사용 중입니다.")
+
+    # [2] 이메일 중복 확인 로직
+    col_em1, col_em2 = st.columns([3, 1], vertical_alignment="bottom")
+    with col_em1:
+        def reset_email_check():
+            st.session_state.email_checked = False
+        new_email = st.text_input("이메일 (본인인증용) *", key="signup_email", help="실제 사용 중인 이메일을 입력하세요.", on_change=reset_email_check)
+    
+    with col_em2:
+        if st.button("중복 확인", key="btn_check_email", use_container_width=True):
+            if not new_email:
+                st.error("입력 필요")
+            elif not re.match(r"[^@]+@[^@]+\.[^@]+", new_email):
+                st.error("형식 오류")
+            else:
+                try:
+                    res = supabase.table("users").select("email").eq("email", new_email).execute()
+                    if res.data:
+                        st.error("사용 불가")
+                        st.session_state.email_checked = False
+                    else:
+                        st.success("사용 가능")
+                        st.session_state.email_checked = True
+                except:
+                    st.error("오류")
+
+    if st.session_state.get('email_checked') is True:
+        st.caption("✅ 사용 가능한 이메일입니다.")
+    elif st.session_state.get('email_checked') is False and new_email:
+        st.caption("❌ 중복 확인이 필요하거나 이미 사용 중입니다.")
+
+    # [3] 비밀번호
     c1, c2 = st.columns(2)
     with c1:
-        new_pw = st.text_input("비밀번호 *", type="password")
+        new_pw = st.text_input("비밀번호 *", type="password", key="signup_pw")
     with c2:
-        new_pw_chk = st.text_input("비밀번호 확인 *", type="password")
+        new_pw_chk = st.text_input("비밀번호 확인 *", type="password", key="signup_pw_chk")
         
     if new_pw and new_pw_chk:
         if new_pw == new_pw_chk:
@@ -236,9 +293,13 @@ def render_signup_view():
         else:
             st.error("비밀번호가 일치하지 않습니다.")
             
-    new_name = st.text_input("이름 *")
-    new_phone = st.text_input("휴대전화 번호 *", placeholder="010-0000-0000")
+    # [4] 이름 (필수로 변경됨)
+    new_name = st.text_input("이름 *", key="signup_name")
     
+    # [5] 휴대전화
+    new_phone = st.text_input("휴대전화 번호 *", placeholder="010-0000-0000", key="signup_phone")
+    
+    # [6] 생년월일/성별
     cc1, cc2 = st.columns(2)
     with cc1:
         b_date = st.date_input("생년월일", min_value=datetime.date(1900, 1, 1))
@@ -246,7 +307,7 @@ def render_signup_view():
         b_time = st.time_input("태어난 시간")
     gender = st.radio("성별 *", ["여성", "남성", "선택 안 함"], horizontal=True)
 
-    # 약관
+    # [7] 약관 동의
     def toggle_all():
         val = st.session_state.agree_all
         st.session_state.agree_service = val
@@ -280,37 +341,39 @@ def render_signup_view():
         st.markdown(load_term_file("marketing.md"))
     st.checkbox("마케팅 정보 수신 동의 (선택)", key="agree_marketing", on_change=toggle_individual)
 
+    # [8] 최종 가입 버튼
     if st.button("가입하기", use_container_width=True):
         # 유효성 검사
-        if not (new_username and new_email and new_pw and new_pw_chk and new_phone):
-            st.error("필수 항목을 모두 입력해주세요.")
+        if not (new_username and new_email and new_pw and new_pw_chk and new_phone and new_name):
+            st.error("필수 항목(*)을 모두 입력해주세요.")
             return
+        
+        # 중복 확인 여부 검사 (핵심!)
+        if not st.session_state.get('id_checked'):
+            st.error("아이디 중복 확인을 해주세요.")
+            return
+        if not st.session_state.get('email_checked'):
+            st.error("이메일 중복 확인을 해주세요.")
+            return
+            
         if new_pw != new_pw_chk:
             st.error("비밀번호가 일치하지 않습니다.")
             return
-        if not re.match(r"[^@]+@[^@]+\.[^@]+", new_email):
-            st.error("이메일 형식이 올바르지 않습니다.")
-            return
+            
         if not (st.session_state.get('agree_service') and st.session_state.get('agree_privacy') and st.session_state.get('agree_location')):
             st.error("필수 약관에 동의해야 합니다.")
             return
             
-        # 가입 로직
+        # 가입 로직 수행
         try:
-            # 1. 아이디 중복 체크
-            dup_check = supabase.table("users").select("*").eq("username", new_username).execute()
-            if dup_check.data:
-                st.error("이미 사용 중인 아이디입니다.")
-                return
-
-            # 2. Auth 가입
+            # 1. Auth 가입
             auth = supabase.auth.sign_up({
                 "email": new_email, "password": new_pw,
                 "options": {"data": {"username": new_username}}
             })
             
             if auth.user and auth.user.identities:
-                # 3. DB 저장
+                # 2. DB 저장
                 user_data = {
                     "id": auth.user.id,
                     "email": new_email,
