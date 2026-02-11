@@ -1,9 +1,11 @@
 streamlit
-google-generativeai
-python-dotenv
+google-genai
+supabase
 pandas
 plotly
 requests
+python-dotenv
 korean_lunar_calendar
-bs4
+beautifulsoup4
 lxml
+watchdog
