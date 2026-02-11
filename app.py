@@ -414,20 +414,19 @@ def render_signup_view():
         st.session_state.auth_mode = 'login'
         st.rerun()
 
-# --- [메인 앱 페이지: 모바일 앱 스타일] ---
+# --- [메인 앱 페이지: 매칭 기능 강화 버전] ---
 def main_app_page():
-    # 모바일 친화적 스타일 (버튼 꽉 차게, 폰트 조정)
+    # 스타일 설정
     st.markdown("""
     <style>
         .stButton>button { width: 100%; border-radius: 12px; height: 3em; font-weight: bold; }
-        .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-        .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 8px; padding: 0 10px; }
-        .stTabs [aria-selected="true"] { background-color: #ff4b4b; color: white; }
-        h1 { font-size: 1.8rem; } h2 { font-size: 1.5rem; } h3 { font-size: 1.2rem; }
+        .match-card { background-color: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #ddd; }
+        .match-score { color: #e91e63; font-weight: bold; font-size: 1.2rem; }
+        .match-tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-right: 5px; color: white; }
     </style>
     """, unsafe_allow_html=True)
     
-    # DB에서 최신 사용자 정보 가져오기 (구독 정보 포함)
+    # 사용자 정보 로드
     user_id = st.session_state['user'].id
     if "db_user_info" not in st.session_state:
         try:
@@ -438,30 +437,24 @@ def main_app_page():
             pass
             
     user_info = st.session_state.get('db_user_info', {})
-    subscription_plan = user_info.get('subscription_plan', 'free') # free 또는 pro
+    subscription_plan = user_info.get('subscription_plan', 'free')
 
-    # --- [네비게이션: 모바일 탭 구조] ---
-    # 실제 앱의 하단 바 역할을 합니다.
+    # 탭 네비게이션
     tab_home, tab_analysis, tab_match, tab_my = st.tabs(["🏠 홈", "🔮 사주분석", "💞 매칭", "👤 내 정보"])
 
     # ----------------------------------------------------------------
-    # 1. [홈 탭] 오늘의 운세 (짧고 강렬하게)
+    # 1. [홈 탭]
     # ----------------------------------------------------------------
     with tab_home:
         st.markdown(f"### 👋 반가워요, **{user_info.get('name', '회원')}**님!")
         
-        # 오늘의 운세 카드
         with st.container(border=True):
             st.markdown("##### 📅 오늘의 한 줄 운세")
-            
-            # [비용 절감] 매번 API 쓰지 말고, 날짜가 같으면 기존 거 보여주기 (세션 활용)
             today_str = datetime.date.today().strftime("%Y-%m-%d")
             
             if "today_fortune" not in st.session_state or st.session_state.get("fortune_date") != today_str:
-                # 간단한 AI 요청 (30자 제한)
                 try:
-                    # 간단한 로직으로 대체하거나(비용0), 매우 짧은 프롬프트 사용
-                    short_prompt = f"사용자({user_info.get('name')})를 위해 오늘({today_str})의 운세를 희망찬 이모지 1개와 함께 30자 이내로 한 문장으로 작성해."
+                    short_prompt = f"사용자({user_info.get('name')})를 위해 오늘({today_str})의 운세를 희망찬 이모지와 함께 30자 이내로 작성해."
                     resp = gemini_client.models.generate_content(model=TARGET_MODEL_NAME, contents=short_prompt)
                     st.session_state["today_fortune"] = resp.text
                     st.session_state["fortune_date"] = today_str
@@ -469,7 +462,6 @@ def main_app_page():
                     st.session_state["today_fortune"] = "🍀 오늘은 작은 행운이 깃든 하루가 될 거예요!"
             
             st.info(st.session_state["today_fortune"])
-            st.caption(f"기준: {today_str}")
 
         st.markdown("---")
         st.markdown("#### 🔥 인기 콘텐츠")
@@ -478,19 +470,16 @@ def main_app_page():
         with c2: st.button("💘 연애운 보기")
 
     # ----------------------------------------------------------------
-    # 2. [사주분석 탭] 핵심 기능
+    # 2. [사주분석 탭] + 저장 기능 추가
     # ----------------------------------------------------------------
     with tab_analysis:
         st.header("🔍 정통 사주 분석")
-        
-        # 분석 결과가 없으면 -> 입력창 보여줌
-        # 분석 결과가 있으면 -> 결과창 보여줌
         
         if "analysis_result" not in st.session_state:
             # [입력 모드]
             st.info("정확한 분석을 위해 정보를 확인해주세요.")
             
-            # 기본값 설정
+            # 기본값 로딩
             def_date = datetime.date.today()
             def_time = datetime.time(12, 0)
             def_idx = 0
@@ -510,43 +499,28 @@ def main_app_page():
             st.markdown("<br>", unsafe_allow_html=True)
             
             if st.button("🔮 사주 분석 시작하기", type="primary"):
-                # 1. 만세력 계산
+                # 계산
                 saju = calculate_saju_pillars(input_date.year, input_date.month, input_date.day, input_time.hour, input_time.minute)
-                cnt = {"목(木)":0, "화(火)":0, "토(土)":0, "금(金)":0, "수(水)":0}
+                cnt = {"목":0, "화":0, "토":0, "금":0, "수":0} # 한글 키로 통일
                 for p in saju.values():
-                    if p['gan'] in OHEANG_MAP: cnt[OHEANG_MAP[p['gan']]] += 1
-                    if p['ji'] in OHEANG_MAP: cnt[OHEANG_MAP[p['ji']]] += 1
+                    if p['gan'] in OHEANG_MAP: cnt[OHEANG_MAP[p['gan']][0]] += 1 # '목(木)' -> '목'
+                    if p['ji'] in OHEANG_MAP: cnt[OHEANG_MAP[p['ji']][0]] += 1
                 
-                # 세션 저장
                 st.session_state["saju_result"] = saju
                 st.session_state["element_counts"] = cnt
                 
-                # [cite_start]2. AI 분석 요청 (무료/유료 분기) [cite: 7]
+                # AI 호출
                 with st.spinner("운명을 분석 중입니다..."):
                     try:
                         u_ctx = {"name": user_info.get('name'), "gender": input_gender, "date": input_date, "time": input_time}
                         full_saju = f"년주:{saju['year']['gan']}{saju['year']['ji']}, 일주:{saju['day']['gan']}{saju['day']['ji']}"
                         
-                        if subscription_plan == 'free':
-                            # [무료] 글자수 제한, 맛보기 요약
-                            sys_prompt = f"""
-                            너는 사주 전문가야. 아래 사람의 사주를 분석해줘.
-                            단, 무료 회원이므로 **핵심 내용만 150자 이내로** 매우 짧게 요약해서 말해줘.
-                            마지막에 "더 자세한 내용은 구독을 통해 확인하세요."라고 덧붙여.
-                            [정보] {u_ctx}, 사주: {full_saju}, 오행: {cnt}
-                            """
-                        else:
-                            # [유료] 제한 없는 상세 분석
-                            sys_prompt = f"""
-                            너는 사주 전문가야. 아래 사람의 사주를 아주 상세하고 친절하게 분석해줘.
-                            전체 형국, 성격, 재물운, 직업운, 조언을 포함해서 1000자 내외로 풍부하게 작성해줘.
-                            [정보] {u_ctx}, 사주: {full_saju}, 오행: {cnt}
-                            """
+                        prompt_sys = f"너는 사주 전문가야. {u_ctx['name']}님의 사주를 분석해줘. (무료회원용 요약)" if subscription_plan == 'free' else f"너는 사주 전문가야. {u_ctx['name']}님의 사주를 상세히 분석해줘."
+                        prompt_sys += f"\n사주: {full_saju}, 오행: {cnt}"
                         
-                        resp = gemini_client.models.generate_content(model=TARGET_MODEL_NAME, contents=sys_prompt)
+                        resp = gemini_client.models.generate_content(model=TARGET_MODEL_NAME, contents=prompt_sys)
                         st.session_state["analysis_result"] = resp.text
-                        st.rerun() # 화면 갱신
-                        
+                        st.rerun()
                     except Exception as e:
                         st.error(f"분석 중 오류: {e}")
 
@@ -554,39 +528,115 @@ def main_app_page():
             # [결과 모드]
             st.success("분석이 완료되었습니다!")
             
-            # 사주 카드 표시 (접었다 폈다 가능하게)
             with st.expander("내 사주 명식표 보기", expanded=False):
                 st.markdown(get_saju_card_html(st.session_state["saju_result"]), unsafe_allow_html=True)
             
-            # 분석 결과 텍스트
             st.markdown("### 📜 분석 결과")
             st.write(st.session_state["analysis_result"])
             
-            # 무료 회원일 경우 블러 처리 효과(느낌) 및 구독 유도
+            # [핵심] 매칭 정보 저장 버튼
+            st.markdown("---")
+            if st.button("💾 이 사주 결과를 '내 매칭 정보'로 저장하기"):
+                try:
+                    # DB 업데이트 (오행 정보 저장)
+                    supabase.table("users").update({
+                        "saju_elements": st.session_state["element_counts"]
+                    }).eq("id", user_id).execute()
+                    
+                    # 세션 갱신
+                    st.session_state['db_user_info']['saju_elements'] = st.session_state["element_counts"]
+                    st.toast("✅ 저장 완료! 이제 '매칭' 탭에서 귀인을 찾을 수 있습니다.")
+                except Exception as e:
+                    st.error(f"저장 실패: {e}")
+
             if subscription_plan == 'free':
-                st.markdown("---")
-                st.warning("🔒 여기까지는 무료 요약본입니다.")
-                st.info("지금 구독하면 **재물운, 직업운, 10년 대운**까지 무제한으로 볼 수 있습니다!")
-                if st.button("💎 3초만에 구독하고 전체 풀이 보기"):
-                    # 실제 결제 연동 전이므로 DB 업데이트 시늉
-                    st.toast("테스트: 'pro' 등급으로 업그레이드합니다. (DB수정 필요)")
-                    # 여기서 supabase update 로직을 넣거나, 결제창 띄움
+                if st.button("💎 구독하고 전체 풀이 보기"):
+                    st.toast("결제 페이지로 이동합니다. (준비 중)")
             
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔄 다른 사주 다시 보기"):
+            if st.button("🔄 다시 분석하기"):
                 del st.session_state["analysis_result"]
                 st.rerun()
 
     # ----------------------------------------------------------------
-    # 3. [매칭 탭]
+    # 3. [매칭 탭] 알고리즘 구현
     # ----------------------------------------------------------------
     with tab_match:
         st.header("💞 운명의 상대 매칭")
-        st.info("준비 중인 기능입니다.")
-        if user_info.get('agree_location'):
-            st.map() # 위치 동의했으면 지도 보여주기 (간지)
+        
+        # 1. 내 정보가 있는지 확인
+        my_elements = user_info.get('saju_elements')
+        
+        if not my_elements:
+            st.warning("⚠️ 아직 내 사주 정보가 저장되지 않았습니다.")
+            st.info("👉 **[사주분석]** 탭에서 분석 후 **'내 매칭 정보로 저장하기'**를 눌러주세요.")
         else:
-            st.error("위치 정보 이용에 동의해야 내 주변 귀인을 찾을 수 있습니다.")
+            # 2. 매칭 로직 실행
+            st.write(f"**{user_info.get('name')}**님에게 부족한 기운을 채워줄 귀인을 찾습니다...")
+            
+            try:
+                # 나를 제외한 유저 불러오기 (실무에선 페이지네이션 필요)
+                candidates_query = supabase.table("users").select("*").neq("id", user_id).execute()
+                candidates = candidates_query.data
+                
+                if not candidates:
+                    st.info("아직 매칭할 다른 회원이 없습니다. 친구를 초대해보세요!")
+                else:
+                    # [매칭 알고리즘]
+                    matches = []
+                    my_lacks = [k for k, v in my_elements.items() if v == 0] # 내가 없는 오행
+                    
+                    for cand in candidates:
+                        cand_elements = cand.get('saju_elements')
+                        if not cand_elements: continue # 정보 없는 유저 패스
+                        
+                        score = 50 # 기본 점수
+                        
+                        # 1) 성별 매칭 (이성에게 가산점)
+                        if user_info.get('gender') != cand.get('gender'):
+                            score += 20
+                            
+                        # 2) 오행 보완 (내가 없는 걸 상대가 3개 이상 가졌으면 대박)
+                        bonus_txt = []
+                        for lack in my_lacks:
+                            if cand_elements.get(lack, 0) >= 3:
+                                score += 30
+                                bonus_txt.append(f"부족한 '{lack}' 기운 가득!")
+                            elif cand_elements.get(lack, 0) >= 1:
+                                score += 10
+                        
+                        # 3) 과다 조심 (나도 많고 쟤도 많으면 감점)
+                        for k, v in my_elements.items():
+                            if v >= 3 and cand_elements.get(k, 0) >= 3:
+                                score -= 10
+                        
+                        matches.append({
+                            "name": cand.get('name', '익명'),
+                            "gender": cand.get('gender', '-'),
+                            "score": min(score, 100), # 100점 만점
+                            "bonus": ", ".join(bonus_txt),
+                            "birth_year": cand.get('birth_date', '????')[:4]
+                        })
+                    
+                    # 점수순 정렬
+                    matches.sort(key=lambda x: x['score'], reverse=True)
+                    
+                    # 리스트 출력
+                    for m in matches[:5]: # 상위 5명만
+                        with st.container():
+                            col_av, col_info, col_score = st.columns([1, 3, 1])
+                            with col_av:
+                                st.markdown("👤")
+                            with col_info:
+                                st.markdown(f"**{m['name']}** ({m['gender']}, {m['birth_year']}년생)")
+                                if m['bonus']:
+                                    st.caption(f"✨ {m['bonus']}")
+                            with col_score:
+                                st.markdown(f"<div style='color:#e91e63; font-weight:bold;'>{m['score']}점</div>", unsafe_allow_html=True)
+                            st.divider()
+                            
+            except Exception as e:
+                st.error(f"매칭 중 오류 발생: {e}")
 
     # ----------------------------------------------------------------
     # 4. [내 정보 탭]
@@ -596,11 +646,12 @@ def main_app_page():
         st.write(f"**이름:** {user_info.get('name')}")
         st.write(f"**등급:** {'💎 PRO' if subscription_plan == 'pro' else '🌱 FREE'}")
         
-        if subscription_plan == 'free':
-            st.button("💎 프리미엄 구독하기")
+        # 내 오행 정보 보여주기
+        if user_info.get('saju_elements'):
+            st.caption("저장된 내 오행 정보:")
+            st.json(user_info.get('saju_elements'))
         
         st.divider()
-        st.caption("고객센터 | 이용약관 | 개인정보처리방침")
         if st.button("로그아웃"):
             supabase.auth.sign_out()
             st.session_state.clear()
