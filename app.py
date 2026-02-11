@@ -537,24 +537,28 @@ def main_app_page():
             # [핵심] 매칭 정보 저장 버튼
             st.markdown("---")
             # [수정된 저장 로직]
+            # [app.py 수정 제안]
             if st.button("💾 이 사주 결과를 '내 매칭 정보'로 저장하기"):
                 try:
-                    # 세션에서 ID를 직접 다시 가져와서 확실하게 체크
-                    current_uid = st.session_state['user'].id 
+                    # 1. 현재 세션에 로그인된 실제 유저 객체에서 ID를 직접 추출
+                    user_id_to_update = st.session_state['user'].id 
                     
-                    # 데이터가 잘 뽑혔는지 확인용 (화면에 출력됨)
-                    st.write("저장될 데이터:", st.session_state["element_counts"])
+                    # 2. 업데이트 실행 전 데이터 확인 로그 (개발자용)
+                    st.write(f"로그인 유저 ID: {user_id_to_update}")
+                    st.write("저장될 오행 데이터:", st.session_state["element_counts"])
 
-                    # DB 업데이트 실행
+                    # 3. DB 업데이트 실행 (.eq 조건을 확실히 명시)
                     response = supabase.table("users").update({
                         "saju_elements": st.session_state["element_counts"]
-                    }).eq("id", current_uid).execute()
+                    }).eq("id", user_id_to_update).execute()
                     
-                    if response.data:
+                    # 4. 결과 판독
+                    if len(response.data) > 0:
                         st.session_state['db_user_info']['saju_elements'] = st.session_state["element_counts"]
-                        st.success("✅ DB에 성공적으로 기록되었습니다!")
+                        st.success("✅ DB에 성공적으로 기록되었습니다! 이제 매칭 탭을 확인하세요.")
                     else:
-                        st.error("❌ 업데이트 대상 행을 찾지 못했습니다. UID를 확인하세요.")
+                        # 이 메시지가 뜬다면, DB에 해당 UUID를 가진 행이 진짜로 없는 것입니다.
+                        st.error(f"❌ 대상을 찾지 못했습니다. DB에 id가 '{user_id_to_update}'인 행이 있는지 확인하세요.")
                         
                 except Exception as e:
                     st.error(f"저장 실패: {e}")
