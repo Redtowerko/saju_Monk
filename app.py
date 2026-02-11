@@ -1,3 +1,4 @@
+import re # [추가] 이메일 정규식 검증을 위해 필요
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -131,7 +132,6 @@ def get_saju_card_html(saju):
     return textwrap.dedent(style + html + '</div>')
 
 # --- [UI: 로그인 및 회원가입 페이지] ---
-# --- [UI: 로그인 및 회원가입 페이지] ---
 def login_page():
     st.title("🔮 운명의 사주 매칭")
     st.markdown("##### 당신의 운명을 확인하고, 부족한 기운을 채워줄 귀인을 만나보세요.")
@@ -151,23 +151,39 @@ def login_page():
                 st.error(f"로그인 실패: 이메일 또는 비밀번호를 확인하세요.")
 
     with tab2: # 회원가입
-        st.info("회원가입을 위해 아래 정보를 입력해주세요.")
-        new_email = st.text_input("이메일", key="signup_email")
-        new_password = st.text_input("비밀번호", type="password", key="signup_pw")
-        new_name = st.text_input("이름 (닉네임)", key="signup_name")
+        st.info("회원가입을 위해 아래 정보를 입력해주세요. (* 표시는 필수 항목)")
         
+        # 1. 아이디 (필수)
+        new_username = st.text_input("아이디 *", key="signup_id")
+        
+        # 2. 이메일 (필수, 형식 검증)
+        new_email = st.text_input("이메일 (본인인증 필수) *", key="signup_email", help="정확한 이메일 주소를 입력해주세요.")
+        
+        # 3. 비밀번호 & 확인 (필수)
+        col_pw1, col_pw2 = st.columns(2)
+        with col_pw1:
+            new_password = st.text_input("비밀번호 *", type="password", key="signup_pw")
+        with col_pw2:
+            new_password_confirm = st.text_input("비밀번호 확인 *", type="password", key="signup_pw_confirm")
+            
+        # 4. 이름 (선택 -> 필수 아님)
+        new_name = st.text_input("이름", key="signup_name")
+        
+        # 5. 휴대전화 번호 (필수)
+        new_phone = st.text_input("휴대전화 번호 *", placeholder="010-0000-0000", key="signup_phone")
+        
+        # 6, 7. 생년월일 & 태어난 시간
         col_s1, col_s2 = st.columns(2)
         with col_s1:
             birth_date = st.date_input("생년월일", min_value=datetime.date(1900, 1, 1))
         with col_s2:
             birth_time = st.time_input("태어난 시간")
-        gender = st.radio("성별", ["여성", "남성"], horizontal=True, key="signup_gender")
+            
+        # 8. 성별 (필수, '선택 안 함' 추가)
+        gender = st.radio("성별 *", ["여성", "남성", "선택 안 함"], horizontal=True, key="signup_gender")
 
-        # --- [약관 동의 로직 개선: 전체 동의 기능] ---
-        
-        # 1. 콜백 함수 정의 (상태 동기화용)
+        # --- [약관 동의 로직] ---
         def toggle_all():
-            """전체 동의 체크박스가 변경될 때 실행"""
             val = st.session_state.agree_all
             st.session_state.agree_service = val
             st.session_state.agree_privacy = val
@@ -175,7 +191,6 @@ def login_page():
             st.session_state.agree_marketing = val
 
         def toggle_individual():
-            """개별 체크박스가 변경될 때 실행 (하나라도 꺼지면 전체 동의 해제)"""
             if (st.session_state.agree_service and 
                 st.session_state.agree_privacy and 
                 st.session_state.agree_location and 
@@ -185,14 +200,11 @@ def login_page():
                 st.session_state.agree_all = False
 
         st.markdown("---")
-        # 전체 동의 체크박스 (on_change로 나머지 제어)
         agree_all = st.checkbox("**약관 전체 동의** (선택 포함)", key="agree_all", on_change=toggle_all)
         st.markdown("---")
 
-        # 개별 체크박스 (key를 할당하여 상태 관리)
         with st.expander("📝 [필수] 서비스 이용약관"):
             st.markdown(load_term_file("service.md"))
-        # key와 on_change 추가
         agree_service = st.checkbox("서비스 이용약관에 동의합니다.", key="agree_service", on_change=toggle_individual)
 
         with st.expander("🔒 [필수] 개인정보 수집 및 이용 동의"):
@@ -207,20 +219,33 @@ def login_page():
             st.markdown(load_term_file("marketing.md"))
         agree_marketing = st.checkbox("마케팅 정보 수신에 동의합니다. (선택)", key="agree_marketing", on_change=toggle_individual)
 
-        # 가입 버튼
+        # 가입 버튼 및 유효성 검사
         if st.button("가입하기", use_container_width=True):
-            if not (agree_service and agree_privacy and agree_location):
-                st.error("필수 약관(서비스, 개인정보, 위치정보)에 모두 동의해야 가입할 수 있습니다.")
+            # 1. 필수 입력값 확인
+            if not (new_username and new_email and new_password and new_password_confirm and new_phone):
+                st.error("모든 필수 항목(*)을 입력해주세요.")
+            # 2. 비밀번호 일치 확인
+            elif new_password != new_password_confirm:
+                st.error("비밀번호가 일치하지 않습니다.")
+            # 3. 이메일 형식 확인 (정규식)
+            elif not re.match(r"[^@]+@[^@]+\.[^@]+", new_email):
+                st.error("올바른 이메일 형식이 아닙니다.")
+            # 4. 필수 약관 동의 확인
+            elif not (agree_service and agree_privacy and agree_location):
+                st.error("필수 약관에 모두 동의해야 가입할 수 있습니다.")
             else:
                 try:
-                    # 1. Auth 가입
+                    # Auth 가입
                     auth_res = supabase.auth.sign_up({"email": new_email, "password": new_password})
+                    
                     if auth_res.user:
-                        # 2. DB에 추가 정보 저장
+                        # DB 저장 (새로 추가된 username, phone 포함)
                         user_data = {
                             "id": auth_res.user.id,
                             "email": new_email,
+                            "username": new_username,  # [신규] 아이디
                             "name": new_name,
+                            "phone": new_phone,        # [신규] 전화번호
                             "birth_date": str(birth_date),
                             "birth_time": str(birth_time),
                             "gender": gender,
