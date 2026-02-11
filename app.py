@@ -131,6 +131,7 @@ def get_saju_card_html(saju):
     return textwrap.dedent(style + html + '</div>')
 
 # --- [UI: 로그인 및 회원가입 페이지] ---
+# --- [UI: 로그인 및 회원가입 페이지] ---
 def login_page():
     st.title("🔮 운명의 사주 매칭")
     st.markdown("##### 당신의 운명을 확인하고, 부족한 기운을 채워줄 귀인을 만나보세요.")
@@ -162,25 +163,51 @@ def login_page():
             birth_time = st.time_input("태어난 시간")
         gender = st.radio("성별", ["여성", "남성"], horizontal=True, key="signup_gender")
 
-        # [수정] 약관 불러오기 (파일에서 로드)
+        # --- [약관 동의 로직 개선: 전체 동의 기능] ---
+        
+        # 1. 콜백 함수 정의 (상태 동기화용)
+        def toggle_all():
+            """전체 동의 체크박스가 변경될 때 실행"""
+            val = st.session_state.agree_all
+            st.session_state.agree_service = val
+            st.session_state.agree_privacy = val
+            st.session_state.agree_location = val
+            st.session_state.agree_marketing = val
+
+        def toggle_individual():
+            """개별 체크박스가 변경될 때 실행 (하나라도 꺼지면 전체 동의 해제)"""
+            if (st.session_state.agree_service and 
+                st.session_state.agree_privacy and 
+                st.session_state.agree_location and 
+                st.session_state.agree_marketing):
+                st.session_state.agree_all = True
+            else:
+                st.session_state.agree_all = False
+
+        st.markdown("---")
+        # 전체 동의 체크박스 (on_change로 나머지 제어)
+        agree_all = st.checkbox("**약관 전체 동의** (선택 포함)", key="agree_all", on_change=toggle_all)
+        st.markdown("---")
+
+        # 개별 체크박스 (key를 할당하여 상태 관리)
         with st.expander("📝 [필수] 서비스 이용약관"):
             st.markdown(load_term_file("service.md"))
-        agree_service = st.checkbox("서비스 이용약관에 동의합니다.")
+        # key와 on_change 추가
+        agree_service = st.checkbox("서비스 이용약관에 동의합니다.", key="agree_service", on_change=toggle_individual)
 
         with st.expander("🔒 [필수] 개인정보 수집 및 이용 동의"):
             st.markdown(load_term_file("privacy.md"))
-        agree_privacy = st.checkbox("개인정보 수집 및 이용에 동의합니다.")
+        agree_privacy = st.checkbox("개인정보 수집 및 이용에 동의합니다.", key="agree_privacy", on_change=toggle_individual)
 
-        # [추가] 위치정보 (지역 매칭용)
         with st.expander("📍 [필수] 위치기반 서비스 이용약관 (매칭용)"):
             st.markdown(load_term_file("location.md"))
-        agree_location = st.checkbox("위치기반 서비스 이용약관에 동의합니다.")
+        agree_location = st.checkbox("위치기반 서비스 이용약관에 동의합니다.", key="agree_location", on_change=toggle_individual)
 
-        # [추가] 마케팅 (광고용) - 선택 사항
         with st.expander("📢 [선택] 마케팅 정보 수신 동의 (광고)"):
             st.markdown(load_term_file("marketing.md"))
-        agree_marketing = st.checkbox("마케팅 정보 수신에 동의합니다. (선택)")
+        agree_marketing = st.checkbox("마케팅 정보 수신에 동의합니다. (선택)", key="agree_marketing", on_change=toggle_individual)
 
+        # 가입 버튼
         if st.button("가입하기", use_container_width=True):
             if not (agree_service and agree_privacy and agree_location):
                 st.error("필수 약관(서비스, 개인정보, 위치정보)에 모두 동의해야 가입할 수 있습니다.")
@@ -189,8 +216,7 @@ def login_page():
                     # 1. Auth 가입
                     auth_res = supabase.auth.sign_up({"email": new_email, "password": new_password})
                     if auth_res.user:
-                        # 2. DB에 추가 정보 저장 (users 테이블)
-                        # [중요] agree_location, agree_marketing 추가
+                        # 2. DB에 추가 정보 저장
                         user_data = {
                             "id": auth_res.user.id,
                             "email": new_email,
