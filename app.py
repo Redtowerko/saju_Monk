@@ -536,16 +536,26 @@ def main_app_page():
             
             # [핵심] 매칭 정보 저장 버튼
             st.markdown("---")
+            # [수정된 저장 로직]
             if st.button("💾 이 사주 결과를 '내 매칭 정보'로 저장하기"):
                 try:
-                    # DB 업데이트 (오행 정보 저장)
-                    supabase.table("users").update({
-                        "saju_elements": st.session_state["element_counts"]
-                    }).eq("id", user_id).execute()
+                    # 세션에서 ID를 직접 다시 가져와서 확실하게 체크
+                    current_uid = st.session_state['user'].id 
                     
-                    # 세션 갱신
-                    st.session_state['db_user_info']['saju_elements'] = st.session_state["element_counts"]
-                    st.toast("✅ 저장 완료! 이제 '매칭' 탭에서 귀인을 찾을 수 있습니다.")
+                    # 데이터가 잘 뽑혔는지 확인용 (화면에 출력됨)
+                    st.write("저장될 데이터:", st.session_state["element_counts"])
+
+                    # DB 업데이트 실행
+                    response = supabase.table("users").update({
+                        "saju_elements": st.session_state["element_counts"]
+                    }).eq("id", current_uid).execute()
+                    
+                    if response.data:
+                        st.session_state['db_user_info']['saju_elements'] = st.session_state["element_counts"]
+                        st.success("✅ DB에 성공적으로 기록되었습니다!")
+                    else:
+                        st.error("❌ 업데이트 대상 행을 찾지 못했습니다. UID를 확인하세요.")
+                        
                 except Exception as e:
                     st.error(f"저장 실패: {e}")
 
