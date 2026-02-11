@@ -1,0 +1,9 @@
+streamlit
+google-generativeai
+python-dotenv
+pandas
+plotly
+requests
+korean_lunar_calendar
+bs4
+lxml
