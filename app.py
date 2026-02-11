@@ -1,4 +1,3 @@
-import re # [추가] 이메일 정규식 검증을 위해 필요
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -8,6 +7,7 @@ import plotly.graph_objects as go
 import datetime
 import os
 import textwrap
+import re # 정규식
 from dotenv import load_dotenv
 from korean_lunar_calendar import KoreanLunarCalendar
 from personas import PERSONAS
@@ -32,7 +32,6 @@ if SUPABASE_URL and SUPABASE_KEY:
 
 # --- [헬퍼 함수: 약관 파일 읽기] ---
 def load_term_file(filename):
-    """terms 폴더 내의 마크다운 파일을 읽어옵니다."""
     try:
         file_path = os.path.join("terms", filename)
         with open(file_path, "r", encoding="utf-8") as f:
@@ -40,7 +39,8 @@ def load_term_file(filename):
     except FileNotFoundError:
         return "약관 내용을 불러올 수 없습니다."
 
-# --- [상수 데이터: 오행/간지] ---
+# --- [상수 데이터] ---
+# (코드 길이상 오행 데이터 등은 유지되었다고 가정합니다. 기존 코드의 상수 부분을 그대로 두세요.)
 OHEANG_DATA = {
     "갑": {"elem": "목(木)", "bg": "#1565C0", "label": "양목"},
     "을": {"elem": "목(木)", "bg": "#1565C0", "label": "음목"},
@@ -77,7 +77,7 @@ OHEANG_MAP = {
     "임": "수(水)", "계": "수(水)", "해": "수(水)", "자": "수(水)"
 }
 
-# --- [함수: 만세력 및 AI 로직] ---
+# --- [계산 로직 함수들] ---
 def calculate_saju_pillars(year, month, day, hour, minute):
     calendar = KoreanLunarCalendar()
     calendar.setSolarDate(year, month, day)
@@ -131,169 +131,211 @@ def get_saju_card_html(saju):
         html += f"""<div class="pillar-card"><div class="card-header">{headers[i]}</div><div class="char-section" style="background-color:{gd['bg']}"><div class="char-big">{p['gan_hanja']}</div><div class="char-desc">{p['gan']}:{gd['elem']}</div><div class="char-tag">{gd['label']}</div></div><div class="char-section" style="background-color:{jd['bg']}"><div class="char-big">{p['ji_hanja']}</div><div class="char-desc">{p['ji']}:{jd['elem']}</div><div class="char-tag">{jd['label']}</div></div><div class="card-footer">오행:{gd['elem'][0]}/{jd['elem'][0]}</div></div>"""
     return textwrap.dedent(style + html + '</div>')
 
-# --- [UI: 로그인 및 회원가입 페이지] ---
+# =======================================================
+# [인증 화면 UI 분리 - 라우터 적용]
+# =======================================================
+
 def login_page():
+    # 세션 상태로 화면 전환 관리 ('login', 'signup', 'reset')
+    if 'auth_mode' not in st.session_state:
+        st.session_state.auth_mode = 'login'
+
+    # 화면 라우팅
+    if st.session_state.auth_mode == 'login':
+        render_login_view()
+    elif st.session_state.auth_mode == 'signup':
+        render_signup_view()
+    elif st.session_state.auth_mode == 'reset':
+        render_reset_view()
+
+def render_login_view():
     st.title("🔮 운명의 사주 매칭")
-    st.markdown("##### 당신의 운명을 확인하고, 부족한 기운을 채워줄 귀인을 만나보세요.")
+    st.subheader("로그인")
     
-    tab1, tab2 = st.tabs(["로그인", "회원가입"])
-    
-    with tab1: # 로그인
-        email = st.text_input("이메일", key="login_email")
-        password = st.text_input("비밀번호", type="password", key="login_pw")
-        if st.button("로그인", use_container_width=True):
-            try:
-                res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-                st.session_state['user'] = res.user
-                st.session_state['is_logged_in'] = True
-                st.rerun()
-            except Exception as e:
-                # 에러 메시지 분기 처리 (이메일 미인증 vs 비밀번호 틀림)
-                err_msg = str(e)
-                if "Email not confirmed" in err_msg:
-                    st.warning("⚠️ 이메일 인증이 완료되지 않았습니다. 메일함을 확인해주세요.")
-                else:
-                    st.error("로그인 실패: 이메일 또는 비밀번호를 확인하세요.")
+    with st.form("login_form"):
+        username = st.text_input("아이디") # 이메일 아님! ID 입력
+        password = st.text_input("비밀번호", type="password")
+        login_submitted = st.form_submit_button("로그인", use_container_width=True)
 
-    with tab2: # 회원가입
-        st.info("회원가입을 위해 아래 정보를 입력해주세요. (* 표시는 필수 항목)")
-        
-        # 1. 아이디 (필수)
-        new_username = st.text_input("아이디 *", key="signup_id")
-        
-        # 2. 이메일 (필수)
-        new_email = st.text_input("이메일 (본인인증 필수) *", key="signup_email", help="가입 후 발송되는 메일에서 인증 링크를 클릭해야 가입이 완료됩니다.")
-        
-        # 3. 비밀번호 & 확인 (필수) - [즉시 확인 로직 적용]
-        col_pw1, col_pw2 = st.columns(2)
-        with col_pw1:
-            new_password = st.text_input("비밀번호 *", type="password", key="signup_pw")
-        with col_pw2:
-            new_password_confirm = st.text_input("비밀번호 확인 *", type="password", key="signup_pw_confirm")
-        
-        # [비밀번호 일치 여부 즉시 피드백]
-        if new_password and new_password_confirm:
-            if new_password == new_password_confirm:
-                st.success("✅ 비밀번호가 일치합니다.")
-            else:
-                st.error("❌ 비밀번호가 일치하지 않습니다.")
-            
-        # 4. 이름 (필수)
-        new_name = st.text_input("이름 *", key="signup_name")
-        
-        # 5. 휴대전화 번호 (필수)
-        new_phone = st.text_input("휴대전화 번호 *", placeholder="010-0000-0000", key="signup_phone")
-        
-        # 6, 7. 생년월일 & 태어난 시간
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            birth_date = st.date_input("생년월일", min_value=datetime.date(1900, 1, 1))
-        with col_s2:
-            birth_time = st.time_input("태어난 시간")
-            
-        # 8. 성별 (필수, '선택 안 함'으로 변경)
-        gender = st.radio("성별 *", ["여성", "남성", "선택 안 함"], horizontal=True, key="signup_gender")
-
-        # --- [약관 동의 로직] ---
-        def toggle_all():
-            val = st.session_state.agree_all
-            st.session_state.agree_service = val
-            st.session_state.agree_privacy = val
-            st.session_state.agree_location = val
-            st.session_state.agree_marketing = val
-
-        def toggle_individual():
-            if (st.session_state.agree_service and 
-                st.session_state.agree_privacy and 
-                st.session_state.agree_location and 
-                st.session_state.agree_marketing):
-                st.session_state.agree_all = True
-            else:
-                st.session_state.agree_all = False
-
-        st.markdown("---")
-        agree_all = st.checkbox("**약관 전체 동의** (선택 포함)", key="agree_all", on_change=toggle_all)
-        st.markdown("---")
-
-        with st.expander("📝 [필수] 서비스 이용약관"):
-            st.markdown(load_term_file("service.md"))
-        agree_service = st.checkbox("서비스 이용약관에 동의합니다.", key="agree_service", on_change=toggle_individual)
-
-        with st.expander("🔒 [필수] 개인정보 수집 및 이용 동의"):
-            st.markdown(load_term_file("privacy.md"))
-        agree_privacy = st.checkbox("개인정보 수집 및 이용에 동의합니다.", key="agree_privacy", on_change=toggle_individual)
-
-        with st.expander("📍 [필수] 위치기반 서비스 이용약관 (매칭용)"):
-            st.markdown(load_term_file("location.md"))
-        agree_location = st.checkbox("위치기반 서비스 이용약관에 동의합니다.", key="agree_location", on_change=toggle_individual)
-
-        with st.expander("📢 [선택] 마케팅 정보 수신 동의 (광고)"):
-            st.markdown(load_term_file("marketing.md"))
-        agree_marketing = st.checkbox("마케팅 정보 수신에 동의합니다. (선택)", key="agree_marketing", on_change=toggle_individual)
-
-        # 가입 버튼
-        if st.button("가입하기", use_container_width=True):
-            # 1. 필수 입력값 확인
-            if not (new_username and new_email and new_password and new_password_confirm and new_phone):
-                st.error("모든 필수 항목(*)을 입력해주세요.")
-            # 2. 비밀번호 일치 확인
-            elif new_password != new_password_confirm:
-                st.error("비밀번호가 일치하지 않습니다.")
-            # 3. 이메일 형식 확인
-            elif not re.match(r"[^@]+@[^@]+\.[^@]+", new_email):
-                st.error("올바른 이메일 형식이 아닙니다.")
-            # 4. 필수 약관 동의 확인
-            elif not (agree_service and agree_privacy and agree_location):
-                st.error("필수 약관에 모두 동의해야 가입할 수 있습니다.")
+        if login_submitted:
+            if not username or not password:
+                st.error("아이디와 비밀번호를 입력해주세요.")
             else:
                 try:
-                    # [핵심] Auth 가입 요청 (이메일 발송됨)
-                    # options 데이터는 가입 후 메일 인증 시 Supabase가 DB에 트리거할 때 쓸 수 있습니다.
-                    auth_res = supabase.auth.sign_up({
-                        "email": new_email, 
-                        "password": new_password,
-                        "options": {
-                            "data": {
-                                "username": new_username,
-                                "name": new_name,
-                                "phone": new_phone
-                            }
-                        }
-                    })
+                    # [핵심] 아이디로 이메일 찾기 (ID 로그인 구현)
+                    user_query = supabase.table("users").select("email").eq("username", username).execute()
                     
-                    # Supabase Auth에 성공적으로 등록되었으면 (이메일 발송됨)
-                    if auth_res.user and auth_res.user.identities:
-                        # DB에 추가 정보 저장
-                        user_data = {
-                            "id": auth_res.user.id,
-                            "email": new_email,
-                            "username": new_username,
-                            "name": new_name,
-                            "phone": new_phone,
-                            "birth_date": str(birth_date),
-                            "birth_time": str(birth_time),
-                            "gender": gender,
-                            "agree_location": agree_location,
-                            "agree_marketing": agree_marketing
-                        }
-                        supabase.table("users").insert(user_data).execute()
-                        
-                        # [성공 메시지 - 중요]
-                        st.success(f"""
-                        ✅ 가입 요청이 완료되었습니다! 
-                        
-                        **{new_email}** 주소로 인증 메일을 보냈습니다.
-                        메일함에서 **'Confirm your signup'** 버튼을 클릭하시면 가입이 완료됩니다.
-                        그 후 로그인 탭에서 로그인해주세요.
-                        """)
+                    if not user_query.data:
+                        st.error("존재하지 않는 아이디입니다.")
                     else:
-                        # 이미 가입된 이메일 등
-                        st.warning("이미 가입된 이메일이거나 가입 요청을 처리할 수 없습니다.")
-                        
+                        target_email = user_query.data[0]['email']
+                        # 찾은 이메일로 로그인 시도
+                        res = supabase.auth.sign_in_with_password({"email": target_email, "password": password})
+                        st.session_state['user'] = res.user
+                        st.session_state['is_logged_in'] = True
+                        st.rerun()
                 except Exception as e:
-                    st.error(f"가입 오류: {str(e)}")
+                    msg = str(e)
+                    if "Email not confirmed" in msg:
+                        st.warning("이메일 인증이 완료되지 않았습니다. 메일함을 확인해주세요.")
+                    elif "Invalid login credentials" in msg:
+                        st.error("비밀번호가 일치하지 않습니다.")
+                    else:
+                        st.error(f"로그인 오류: {msg}")
 
-# --- [UI: 메인 사주 앱] ---
+    # 하단 링크 버튼들 (회원가입 / 비밀번호 찾기)
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("회원가입", use_container_width=True):
+            st.session_state.auth_mode = 'signup'
+            st.rerun()
+    with col2:
+        if st.button("비밀번호 찾기", use_container_width=True):
+            st.session_state.auth_mode = 'reset'
+            st.rerun()
+
+def render_reset_view():
+    st.title("🔐 비밀번호 찾기")
+    st.info("가입 시 등록한 이메일 주소를 입력하시면, 비밀번호 재설정 링크를 보내드립니다.")
+    
+    email = st.text_input("이메일 주소")
+    
+    if st.button("재설정 메일 전송", use_container_width=True):
+        if not email:
+            st.error("이메일을 입력해주세요.")
+        else:
+            try:
+                # Supabase 비밀번호 리셋 요청
+                supabase.auth.reset_password_for_email(email, options={"redirect_to": "https://sajumonk.streamlit.app/"})
+                st.success("✅ 메일이 발송되었습니다. 메일함을 확인해주세요.")
+            except Exception as e:
+                st.error(f"전송 실패: {str(e)}")
+    
+    st.markdown("---")
+    if st.button("로그인 화면으로 돌아가기"):
+        st.session_state.auth_mode = 'login'
+        st.rerun()
+
+def render_signup_view():
+    st.title("📝 회원가입")
+    st.caption("운명의 상대를 만나기 위한 첫 걸음입니다.")
+    
+    # 입력 폼
+    new_username = st.text_input("아이디 *")
+    new_email = st.text_input("이메일 (본인인증/비밀번호 찾기용) *", help="실제 사용 중인 이메일을 입력하세요.")
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        new_pw = st.text_input("비밀번호 *", type="password")
+    with c2:
+        new_pw_chk = st.text_input("비밀번호 확인 *", type="password")
+        
+    if new_pw and new_pw_chk:
+        if new_pw == new_pw_chk:
+            st.success("비밀번호가 일치합니다.")
+        else:
+            st.error("비밀번호가 일치하지 않습니다.")
+            
+    new_name = st.text_input("이름 *")
+    new_phone = st.text_input("휴대전화 번호 *", placeholder="010-0000-0000")
+    
+    cc1, cc2 = st.columns(2)
+    with cc1:
+        b_date = st.date_input("생년월일", min_value=datetime.date(1900, 1, 1))
+    with cc2:
+        b_time = st.time_input("태어난 시간")
+    gender = st.radio("성별 *", ["여성", "남성", "선택 안 함"], horizontal=True)
+
+    # 약관
+    def toggle_all():
+        val = st.session_state.agree_all
+        st.session_state.agree_service = val
+        st.session_state.agree_privacy = val
+        st.session_state.agree_location = val
+        st.session_state.agree_marketing = val
+
+    def toggle_individual():
+        if (st.session_state.get('agree_service') and st.session_state.get('agree_privacy') and 
+            st.session_state.get('agree_location') and st.session_state.get('agree_marketing')):
+            st.session_state.agree_all = True
+        else:
+            st.session_state.agree_all = False
+
+    st.markdown("---")
+    st.checkbox("약관 전체 동의", key="agree_all", on_change=toggle_all)
+    
+    with st.expander("📝 [필수] 서비스 이용약관"):
+        st.markdown(load_term_file("service.md"))
+    st.checkbox("서비스 이용약관 동의", key="agree_service", on_change=toggle_individual)
+
+    with st.expander("🔒 [필수] 개인정보 수집 및 이용 동의"):
+        st.markdown(load_term_file("privacy.md"))
+    st.checkbox("개인정보 수집 및 이용 동의", key="agree_privacy", on_change=toggle_individual)
+
+    with st.expander("📍 [필수] 위치기반 서비스 이용약관"):
+        st.markdown(load_term_file("location.md"))
+    st.checkbox("위치기반 서비스 이용약관 동의", key="agree_location", on_change=toggle_individual)
+
+    with st.expander("📢 [선택] 마케팅 정보 수신 동의"):
+        st.markdown(load_term_file("marketing.md"))
+    st.checkbox("마케팅 정보 수신 동의 (선택)", key="agree_marketing", on_change=toggle_individual)
+
+    if st.button("가입하기", use_container_width=True):
+        # 유효성 검사
+        if not (new_username and new_email and new_pw and new_pw_chk and new_phone):
+            st.error("필수 항목을 모두 입력해주세요.")
+            return
+        if new_pw != new_pw_chk:
+            st.error("비밀번호가 일치하지 않습니다.")
+            return
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", new_email):
+            st.error("이메일 형식이 올바르지 않습니다.")
+            return
+        if not (st.session_state.get('agree_service') and st.session_state.get('agree_privacy') and st.session_state.get('agree_location')):
+            st.error("필수 약관에 동의해야 합니다.")
+            return
+            
+        # 가입 로직
+        try:
+            # 1. 아이디 중복 체크
+            dup_check = supabase.table("users").select("*").eq("username", new_username).execute()
+            if dup_check.data:
+                st.error("이미 사용 중인 아이디입니다.")
+                return
+
+            # 2. Auth 가입
+            auth = supabase.auth.sign_up({
+                "email": new_email, "password": new_pw,
+                "options": {"data": {"username": new_username}}
+            })
+            
+            if auth.user and auth.user.identities:
+                # 3. DB 저장
+                user_data = {
+                    "id": auth.user.id,
+                    "email": new_email,
+                    "username": new_username,
+                    "name": new_name,
+                    "phone": new_phone,
+                    "birth_date": str(b_date),
+                    "birth_time": str(b_time),
+                    "gender": gender,
+                    "agree_location": st.session_state.agree_location,
+                    "agree_marketing": st.session_state.agree_marketing
+                }
+                supabase.table("users").insert(user_data).execute()
+                st.success(f"가입 요청 완료! {new_email}로 발송된 인증 메일을 확인해주세요.")
+            else:
+                st.warning("이미 가입된 이메일이거나 요청을 처리할 수 없습니다.")
+        except Exception as e:
+            st.error(f"가입 중 오류 발생: {e}")
+
+    st.markdown("---")
+    if st.button("로그인 화면으로 돌아가기"):
+        st.session_state.auth_mode = 'login'
+        st.rerun()
+
+# --- [메인 앱 페이지] ---
 def main_app_page():
     # 스타일 설정
     st.markdown("""<style>h1 { font-family: 'Serif'; } .stChatInputContainer { padding-bottom: 20px; } .stChatMessage { border-radius: 15px; margin-bottom: 10px; }</style>""", unsafe_allow_html=True)
@@ -311,6 +353,7 @@ def main_app_page():
     with st.sidebar:
         st.title(f"반갑습니다, {user_info.get('name', '회원')}님!")
         if st.button("로그아웃"):
+            supabase.auth.sign_out() # 로그아웃 처리
             st.session_state.clear()
             st.rerun()
             
