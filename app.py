@@ -4,13 +4,10 @@ from google.genai import types
 from supabase import create_client, Client
 import pandas as pd
 import plotly.graph_objects as go
-import requests
 import datetime
 import os
 import textwrap
-import json
 from dotenv import load_dotenv
-from bs4 import BeautifulSoup
 from korean_lunar_calendar import KoreanLunarCalendar
 from personas import PERSONAS
 
@@ -19,24 +16,30 @@ load_dotenv()
 
 # API 키 설정
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-KASI_API_KEY = os.getenv("KASI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 TARGET_MODEL_NAME = "gemini-2.0-flash"
 
 # 2. 클라이언트 초기화
-# Gemini
 gemini_client = None
 if GEMINI_API_KEY:
     gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Supabase
 supabase: Client = None
 if SUPABASE_URL and SUPABASE_KEY:
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# --- [헬퍼 함수: 약관 파일 읽기] ---
+def load_term_file(filename):
+    """terms 폴더 내의 마크다운 파일을 읽어옵니다."""
+    try:
+        file_path = os.path.join("terms", filename)
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "약관 내용을 불러올 수 없습니다."
+
 # --- [상수 데이터: 오행/간지] ---
-# (기존 코드의 상수 데이터 부분은 너무 길어서 생략하지 않고 그대로 둡니다. 중요!)
 OHEANG_DATA = {
     "갑": {"elem": "목(木)", "bg": "#1565C0", "label": "양목"},
     "을": {"elem": "목(木)", "bg": "#1565C0", "label": "음목"},
@@ -74,7 +77,6 @@ OHEANG_MAP = {
 }
 
 # --- [함수: 만세력 및 AI 로직] ---
-# (기존 함수들 그대로 사용)
 def calculate_saju_pillars(year, month, day, hour, minute):
     calendar = KoreanLunarCalendar()
     calendar.setSolarDate(year, month, day)
@@ -160,40 +162,44 @@ def login_page():
             birth_time = st.time_input("태어난 시간")
         gender = st.radio("성별", ["여성", "남성"], horizontal=True, key="signup_gender")
 
-        # 약관 동의 (업로드된 파일 기반)
-        with st.expander("📝 [필수] 서비스 이용약관"):
-            st.markdown("""
-            **제1조(목적)** 본 약관은 회사가 제공하는 서비스의 이용조건 및 절차를 규정합니다.
-            **제2조(계약)** 회원은 본 약관에 동의함으로써 서비스 이용계약이 성립됩니다...
-            (상세 내용은 카카오 통합서비스 약관 참조)
-            """) 
+        # [수정] 약관 불러오기 (파일에서 로드)
+        [cite_start]with st.expander("📝 [필수] 서비스 이용약관 [cite: 153]"):
+            st.markdown(load_term_file("service.md"))
         agree_service = st.checkbox("서비스 이용약관에 동의합니다.")
 
-        with st.expander("🔒 [필수] 개인정보 수집 및 이용 동의"):
-            st.markdown("""
-            **수집목적:** 이용자 식별, 서비스 제공, 맞춤형 추천 (사주 분석 등)
-            **수집항목:** 이메일, 비밀번호, 이름, 생년월일, 태어난 시, 성별
-            **보유기간:** 회원 탈퇴 시까지 (단, 법령에 따른 보존 기간 준수)
-            (상세 내용은 카카오 개인정보 처리방침 참조)
-            """)
+        [cite_start]with st.expander("🔒 [필수] 개인정보 수집 및 이용 동의 [cite: 5]"):
+            st.markdown(load_term_file("privacy.md"))
         agree_privacy = st.checkbox("개인정보 수집 및 이용에 동의합니다.")
 
+        # [cite_start][추가] 위치정보 (지역 매칭용) [cite: 31]
+        with st.expander("📍 [필수] 위치기반 서비스 이용약관 (매칭용)"):
+            st.markdown(load_term_file("location.md"))
+        agree_location = st.checkbox("위치기반 서비스 이용약관에 동의합니다.")
+
+        # [cite_start][추가] 마케팅 (광고용) - 선택 사항 [cite: 355]
+        with st.expander("📢 [선택] 마케팅 정보 수신 동의 (광고)"):
+            st.markdown(load_term_file("marketing.md"))
+        agree_marketing = st.checkbox("마케팅 정보 수신에 동의합니다. (선택)")
+
         if st.button("가입하기", use_container_width=True):
-            if not (agree_service and agree_privacy):
-                st.error("모든 필수 약관에 동의해야 가입할 수 있습니다.")
+            if not (agree_service and agree_privacy and agree_location):
+                st.error("필수 약관(서비스, 개인정보, 위치정보)에 모두 동의해야 가입할 수 있습니다.")
             else:
                 try:
                     # 1. Auth 가입
                     auth_res = supabase.auth.sign_up({"email": new_email, "password": new_password})
                     if auth_res.user:
                         # 2. DB에 추가 정보 저장 (users 테이블)
+                        # [중요] agree_location, agree_marketing 추가
                         user_data = {
                             "id": auth_res.user.id,
                             "email": new_email,
                             "name": new_name,
                             "birth_date": str(birth_date),
                             "birth_time": str(birth_time),
-                            "gender": gender
+                            "gender": gender,
+                            "agree_location": agree_location,
+                            "agree_marketing": agree_marketing
                         }
                         supabase.table("users").insert(user_data).execute()
                         st.success("가입 성공! 로그인 탭에서 로그인해주세요.")
@@ -232,11 +238,14 @@ def main_app_page():
             st.session_state["current_persona"] = selected_persona_key
             st.session_state["messages"] = [{"role": "assistant", "content": current_persona['welcome']}]
 
-        # 매칭 기능 예고 (MBA 출신 기획 요소)
+        # 매칭 기능 예고
         st.divider()
         st.caption("🚀 Beta Feature")
         if st.button("💘 내 귀인 찾기 (매칭)"):
-            st.toast("매칭 시스템은 현재 준비 중입니다. 곧 지역/오행 기반 매칭이 오픈됩니다!", icon="🚧")
+            if user_info.get('agree_location'):
+                st.toast("현재 회원님의 지역(위치)을 기반으로 귀인을 찾고 있습니다... (준비 중)", icon="🕵️")
+            else:
+                st.error("위치 정보 동의가 필요합니다.")
 
     # 세션 초기화
     if "saju_result" not in st.session_state:
