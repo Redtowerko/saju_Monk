@@ -12,23 +12,39 @@ from dotenv import load_dotenv
 from korean_lunar_calendar import KoreanLunarCalendar
 from personas import PERSONAS
 
-# 1. 환경 변수 로드
+# 1. 환경 변수 및 Secrets 로드 (순서 중요!)
 load_dotenv()
 
+def get_secret(key_name):
+    # 1순위: 내 컴퓨터 환경변수 (.env)
+    value = os.getenv(key_name)
+    # 2순위: Streamlit Cloud Secrets
+    if not value and key_name in st.secrets:
+        value = st.secrets[key_name]
+    return value
+
 # API 키 설정
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
+SUPABASE_URL = get_secret("SUPABASE_URL")
+SUPABASE_KEY = get_secret("SUPABASE_KEY")
 TARGET_MODEL_NAME = "gemini-2.0-flash"
 
 # 2. 클라이언트 초기화
 gemini_client = None
 if GEMINI_API_KEY:
-    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    try:
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    except Exception as e:
+        st.error(f"Gemini 연결 실패: {e}")
+else:
+    st.error("🚨 API 키를 찾을 수 없습니다. Streamlit Secrets 설정을 확인해주세요.")
 
 supabase: Client = None
 if SUPABASE_URL and SUPABASE_KEY:
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        st.error(f"Supabase 연결 실패: {e}")
 
 # --- [헬퍼 함수: 약관 파일 읽기] ---
 def load_term_file(filename):
